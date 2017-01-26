@@ -2105,7 +2105,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	 * Set the read-only status based on the supported commands
 	 * and the write protect switch.
 	 */
-	md->read_only = mmc_blk_readonly(card);
+	md->read_only = 0 ;// mmc_blk_readonly(card);
 
 	md->disk = alloc_disk(perdev_minors);
 	if (md->disk == NULL) {

@@ -25,6 +25,8 @@
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 
+#define DEBUG(fmt,arg...)   	;//printk(fmt,##arg);
+
 #define ULITE_NAME		"ttyUL"
 #define ULITE_MAJOR		204
 #define ULITE_MINOR		187
@@ -194,9 +196,11 @@ static irqreturn_t ulite_isr(int irq, void *dev_id)
 {
 	struct uart_port *port = dev_id;
 	int busy, n = 0;
+	DEBUG("[uartlite] irq:%d\n",irq);
 
 	do {
 		int stat = uart_in32(ULITE_STATUS, port);
+		DEBUG("stat %d\n",stat);
 		busy  = ulite_receive(port, stat);
 		busy |= ulite_transmit(port, stat);
 		n++;
@@ -259,9 +263,12 @@ static int ulite_startup(struct uart_port *port)
 {
 	int ret;
 
-	ret = request_irq(port->irq, ulite_isr, IRQF_SHARED, "uartlite", port);
+	ret = request_irq(port->irq, ulite_isr, IRQF_TRIGGER_RISING, "uartlite", port);
 	if (ret)
+	{
+		DEBUG("[uartlite]request irq error:%d\n",port->irq);
 		return ret;
+	}
 
 	uart_out32(ULITE_CONTROL_RST_RX | ULITE_CONTROL_RST_TX,
 		ULITE_CONTROL, port);

@@ -936,13 +936,17 @@ static int __ref kernel_init(void *unused)
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 	free_initmem();
+	printk("free_initmem ok\n");
 	mark_rodata_ro();
+	printk("mark_rodata_ro ok\n");
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
-
+	printk("numa_default ok\n");
 	flush_delayed_fput();
 
 	if (ramdisk_execute_command) {
+		printk("ramdisk int\n");
+		printk("%s",ramdisk_execute_command);
 		ret = run_init_process(ramdisk_execute_command);
 		if (!ret)
 			return 0;
@@ -957,6 +961,7 @@ static int __ref kernel_init(void *unused)
 	 * trying to recover a really broken machine.
 	 */
 	if (execute_command) {
+		printk("execute int\n");
 		ret = run_init_process(execute_command);
 		if (!ret)
 			return 0;
