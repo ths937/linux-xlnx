@@ -76,7 +76,7 @@ struct flash_info {
 					 * bit. Must be used with
 					 * SPI_NOR_HAS_LOCK.
 						*/
-#define	SST_GLOBAL_PROT_UNLK	0x100	/* Unlock the Global protection for
+#define	SST_GLOBAL_PROT_UNLK	BIT(10)	/* Unlock the Global protection for
 					 * sst flashes
 					 */
 
@@ -102,7 +102,7 @@ static int read_sr(struct spi_nor *nor)
 			pr_err("error %d reading SR\n", (int) ret);
 			return ret;
 		}
-		val[0] &= val[1];
+		val[0] |= val[1];
 	} else {
 		ret = nor->read_reg(nor, SPINOR_OP_RDSR, &val[0], 1);
 		if (ret < 0) {
@@ -385,7 +385,6 @@ static int write_ear(struct spi_nor *nor, u32 addr)
 		write_enable(nor);
 		code = SPINOR_OP_WREAR;
 	}
-	printk("jedecid %x\n\r",nor->jedec_id);
 	nor->cmd_buf[0] = ear;
 
 	ret = nor->write_reg(nor, code, nor->cmd_buf, 1);
@@ -558,6 +557,9 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 			ret = spi_nor_wait_till_ready(nor);
 			if (ret)
 				goto erase_err;
+
+			write_enable(nor);
+
 			ret = spi_nor_erase_sector(nor, offset);
 			if (ret)
 				goto erase_err;
@@ -1184,6 +1186,8 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "640s33b",  INFO(0x898913, 0, 64 * 1024, 128, 0) },
 
 	/* ISSI */
+	{ "is25lp256d", INFO(0x9d6019, 0, 64 * 1024, 512, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_HAS_LOCK) },
+	{ "is25wp256d", INFO(0x9d7019, 0, 64 * 1024, 512, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_HAS_LOCK) },
 	{ "is25cd512", INFO(0x7f9d20, 0, 32 * 1024,   2, SECT_4K) },
 
 	/* Macronix */
@@ -1210,7 +1214,7 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "n25q064a",    INFO(0x20bb17, 0, 64 * 1024,  128, SECT_4K | SPI_NOR_QUAD_READ) },
 	{ "n25q128a11",  INFO(0x20bb18, 0, 64 * 1024,  256, SECT_4K | SPI_NOR_QUAD_READ | USE_FSR | SPI_NOR_HAS_LOCK) },
 	{ "n25q128a13",  INFO(0x20ba18, 0, 64 * 1024,  256, SECT_4K | SPI_NOR_QUAD_READ | USE_FSR | SPI_NOR_HAS_LOCK) },
-	{ "n25q256a",    INFO(0x20ba19, 0, 64 * 1024,  512, SECT_4K | SPI_NOR_QUAD_READ | USE_FSR| SPI_NOR_HAS_LOCK) },
+	{ "n25q256a",    INFO(0x20bb19, 0, 64 * 1024,  512, SECT_4K | SPI_NOR_QUAD_READ | USE_FSR| SPI_NOR_HAS_LOCK) },
 	{ "n25q256a13",  INFO(0x20ba19, 0, 64 * 1024,  512, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | USE_FSR | SPI_NOR_HAS_LOCK) },
 	{ "n25q512a",    INFO(0x20bb20, 0, 64 * 1024, 1024, SECT_4K | USE_FSR | SPI_NOR_QUAD_READ | SPI_NOR_HAS_LOCK) },
 	{ "n25q512a13",  INFO(0x20ba20, 0, 64 * 1024, 1024, SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | USE_FSR | SPI_NOR_HAS_LOCK) },
@@ -1234,7 +1238,7 @@ static const struct flash_info spi_nor_ids[] = {
 	{ "s70fl01gs",  INFO(0x010221, 0x4d00, 256 * 1024, 256, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ) },
 	{ "s25sl12800", INFO(0x012018, 0x0300, 256 * 1024,  64, SPI_NOR_HAS_LOCK) },
 	{ "s25sl12801", INFO(0x012018, 0x0301,  64 * 1024, 256, SPI_NOR_HAS_LOCK) },
-	{ "s25fl128s",	INFO6(0x012018, 0x4d0180, 64 * 1024, 256, SECT_4K | SPI_NOR_QUAD_READ) },
+	{ "s25fl128s",	INFO6(0x012018, 0x4d0180, 64 * 1024, 256, SPI_NOR_QUAD_READ) },
 	{ "s25fl129p0", INFO(0x012018, 0x4d00, 256 * 1024,  64, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_HAS_LOCK) },
 	{ "s25fl129p1", INFO(0x012018, 0x4d01,  64 * 1024, 256, SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ | SPI_NOR_HAS_LOCK) },
 	{ "s25sl004a",  INFO(0x010212,      0,  64 * 1024,   8, 0) },
@@ -1361,8 +1365,8 @@ static const struct flash_info *spi_nor_read_id(struct spi_nor *nor)
 				return &spi_nor_ids[tmp];
 		}
 	}
-	dev_err(nor->dev, "unrecognized JEDEC id bytes: %02x, %02x, %02x info: %02x, %02x, %02x\n",
-		id[0], id[1], id[2],info->id[0],info->id[1],info->id[2]);
+	dev_err(nor->dev, "unrecognized JEDEC id bytes: %02x, %02x, %02x\n",
+		id[0], id[1], id[2]);
 	return ERR_PTR(-ENODEV);
 }
 
@@ -1376,10 +1380,18 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 	u32 read_len = 0;
 	u32 rem_bank_len = 0;
 	u8 bank;
+	u8 is_ofst_odd = 0;
 
 #define OFFSET_16_MB 0x1000000
 
 	dev_dbg(nor->dev, "from 0x%08x, len %zd\n", (u32)from, len);
+
+	if ((nor->isparallel) && (offset & 1)) {
+		/* We can hit this case when we use file system like ubifs */
+		from = (loff_t)(from - 1);
+		len = (size_t)(len + 1);
+		is_ofst_odd = 1;
+	}
 
 	ret = spi_nor_lock_and_prep(nor, SPI_NOR_OPS_READ);
 	if (ret)
@@ -1434,7 +1446,12 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 			goto read_err;
 
 		WARN_ON(ret > len);
-		*retlen += ret;
+		if (is_ofst_odd == 1) {
+			memcpy(buf, (buf + 1), (len - 1));
+			*retlen += (ret - 1);
+		} else {
+			*retlen += ret;
+		}
 		buf += ret;
 		from += ret;
 		len -= ret;
@@ -1556,9 +1573,6 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		}
 
 		page_offset = ((to + i)) & (nor->page_size - 1);
-		WARN_ONCE(page_offset,
-			  "Writing at offset %zu into a NOR page. Writing partial pages may decrease reliability and increase wear of NOR flash.",
-			  page_offset);
 
 		offset = (to + i);
 
@@ -1579,15 +1593,21 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		if (nor->addr_width == 4)
 			rem_bank_len = (mtd->size >> stack_shift) - offset;
 		if (nor->addr_width == 3)
-			write_ear(nor, (offset >> nor->shift));
-		if (len < rem_bank_len) {
+			write_ear(nor, offset);
+		if (nor->isstacked == 1) {
+			if (len <= rem_bank_len) {
+				page_remain = min_t(size_t,
+					 nor->page_size - page_offset, len - i);
+			} else {
+				/*
+				 * the size of data remaining
+				 * on the first page
+				 */
+				page_remain = rem_bank_len;
+			}
+		} else {
 			page_remain = min_t(size_t,
-				    nor->page_size - page_offset, len - i);
-
-		}
-		else {
-		/* the size of data remaining on the first page */
-			page_remain = rem_bank_len;
+					 nor->page_size - page_offset, len - i);
 		}
 		ret = spi_nor_wait_till_ready(nor);
 		if (ret)
@@ -1675,6 +1695,7 @@ static int set_quad_mode(struct spi_nor *nor, const struct flash_info *info)
 
 	switch (JEDEC_MFR(info)) {
 	case SNOR_MFR_MACRONIX:
+	case SNOR_MFR_ISSI:
 		status = macronix_quad_enable(nor);
 		if (status) {
 			dev_err(nor->dev, "Macronix quad-read not enabled\n");
@@ -1891,6 +1912,7 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 	if (info->flags & SPI_NOR_NO_ERASE)
 		mtd->flags |= MTD_NO_ERASE;
 
+	nor->jedec_id = info->id[0];
 	mtd->dev.parent = dev;
 	nor->page_size = info->page_size;
 	mtd->writebufsize = nor->page_size;
@@ -1983,14 +2005,23 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 			/* No small sector erase for 4-byte command set */
 			nor->erase_opcode = SPINOR_OP_SE_4B;
 			mtd->erasesize = info->sector_size;
-		} else
-			set_4byte(nor, info, 1);
-			if (nor->isstacked) {
-				nor->spi->master->flags |= SPI_MASTER_U_PAGE;
+		} else {
+			np_spi = of_get_next_parent(np);
+			if (of_property_match_string(np_spi, "compatible",
+						"xlnx,xps-spi-2.00.a") >= 0) {
+				nor->addr_width = 3;
+				set_4byte(nor, info, 0);
+			} else {
 				set_4byte(nor, info, 1);
-				nor->spi->master->flags &= ~SPI_MASTER_U_PAGE;
-				printk("4 Byte addressing for stacked\n\r");
+				if (nor->isstacked) {
+					nor->spi->master->flags |=
+							SPI_MASTER_U_PAGE;
+					set_4byte(nor, info, 1);
+					nor->spi->master->flags &=
+							~SPI_MASTER_U_PAGE;
+				}
 			}
+		}
 #ifdef CONFIG_OF
 		}
 #endif
@@ -2006,17 +2037,19 @@ int spi_nor_scan(struct spi_nor *nor, const char *name, enum read_mode mode)
 
 	nor->read_dummy = spi_nor_read_dummy_cycles(nor);
 
-	printk("%s (%lld Kbytes)\n", info->name,
+	dev_info(dev, "%s (%lld Kbytes)\n", info->name,
 			(long long)mtd->size >> 10);
 
-	printk("mtd .name = %s, .size = 0x%llx (%lldMiB), "
+	dev_dbg(dev,
+		"mtd .name = %s, .size = 0x%llx (%lldMiB), "
 		".erasesize = 0x%.8x (%uKiB) .numeraseregions = %d\n",
 		mtd->name, (long long)mtd->size, (long long)(mtd->size >> 20),
 		mtd->erasesize, mtd->erasesize / 1024, mtd->numeraseregions);
 
 	if (mtd->numeraseregions)
 		for (i = 0; i < mtd->numeraseregions; i++)
-			printk("mtd.eraseregions[%d] = { .offset = 0x%llx, "
+			dev_dbg(dev,
+				"mtd.eraseregions[%d] = { .offset = 0x%llx, "
 				".erasesize = 0x%.8x (%uKiB), "
 				".numblocks = %d }\n",
 				i, (long long)mtd->eraseregions[i].offset,
@@ -2038,6 +2071,14 @@ static const struct flash_info *spi_nor_match_id(const char *name)
 	}
 	return NULL;
 }
+
+void spi_nor_shutdown(struct spi_nor *nor)
+{
+	if (nor->addr_width == 3 &&
+		(nor->mtd.size >> nor->shift) > 0x1000000)
+		write_ear(nor, 0);
+}
+EXPORT_SYMBOL_GPL(spi_nor_shutdown);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Huang Shijie <shijie8@gmail.com>");

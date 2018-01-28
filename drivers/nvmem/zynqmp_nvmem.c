@@ -16,7 +16,7 @@
 #include <linux/nvmem-provider.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
-#include <linux/soc/xilinx/zynqmp/pm.h>
+#include <linux/soc/xilinx/zynqmp/firmware.h>
 
 #define SILICON_REVISION_MASK 0xF
 
@@ -39,8 +39,8 @@ static int zynqmp_nvmem_read(void *context, unsigned int offset,
 static struct nvmem_config econfig = {
 	.name = "zynqmp-nvmem",
 	.owner = THIS_MODULE,
-	.word_size = 4,
-	.size = 4,
+	.word_size = 1,
+	.size = 1,
 	.read_only = true,
 };
 

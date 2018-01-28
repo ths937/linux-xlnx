@@ -156,6 +156,9 @@
 
 /* Bit fields */
 
+/* Global Status Register */
+#define DWC3_GSTS_CUR_MODE			(1 << 0)
+
 /* Global Debug Queue/FIFO Space Available Register */
 #define DWC3_GDBGFIFOSPACE_NUM(n)	((n) & 0x1f)
 #define DWC3_GDBGFIFOSPACE_TYPE(n)	(((n) << 5) & 0x1e0)
@@ -168,6 +171,12 @@
 #define DWC3_RXINFOQ		9
 #define DWC3_DESCFETCHQ		13
 #define DWC3_EVENTQ		15
+
+/* Global SoC Bus Configuration Register */
+#define DWC3_GSBUSCFG0_DATRDREQINFO	(0xf << 28)
+#define DWC3_GSBUSCFG0_DESRDREQINFO	(0xf << 24)
+#define DWC3_GSBUSCFG0_DATWRREQINFO	(0xf << 20)
+#define DWC3_GSBUSCFG0_DESWRREQINFO	(0xf << 16)
 
 /* Global RX Threshold Configuration Register */
 #define DWC3_GRXTHRCFG_MAXRXBURSTSIZE(n) (((n) & 0x1f) << 19)
@@ -292,6 +301,10 @@
 #define DWC3_GFLADJ_30MHZ_SDBND_SEL		(1 << 7)
 #define DWC3_GFLADJ_30MHZ_MASK			0x3f
 #define DWC3_GFLADJ_REFCLK_FLADJ		(0x3fff << 8)
+
+/* Global User Control Register 1 */
+#define DWC3_GUCTL1_RESUME_QUIRK		(1 << 10)
+#define DWC3_GUCTL1_IPD_QUIRK			(1 << 9)
 
 /* Global User Control Register 2 */
 #define DWC3_GUCTL2_RST_ACTBITLATER		(1 << 14)
@@ -568,6 +581,8 @@ struct dwc3_ep {
 
 	unsigned		direction:1;
 	unsigned		stream_capable:1;
+#define STREAM_TIMEOUT		50
+	struct timer_list	stream_timeout_timer;
 };
 
 enum dwc3_phy {
@@ -717,8 +732,10 @@ struct dwc3_request {
 	struct list_head	list;
 	struct dwc3_ep		*dep;
 	struct scatterlist	*sg;
+	struct scatterlist	*sg_to_start;
 
 	unsigned		num_pending_sgs;
+	unsigned int		num_queued_sgs;
 	u8			first_trb_index;
 	u8			epnum;
 	struct dwc3_trb		*trb;
@@ -755,6 +772,7 @@ struct dwc3_scratchpad_array {
  * @event_buffer_list: a list of event buffers
  * @gadget: device side representation of the peripheral controller
  * @gadget_driver: pointer to the gadget driver
+ * @otg: pointer to the dwc3_otg structure
  * @regs: base address for our registers
  * @regs_size: address space size
  * @fladj: frame length adjustment
@@ -812,6 +830,7 @@ struct dwc3_scratchpad_array {
  * @start_config_issued: true when StartConfig command has been issued
  * @three_stage_setup: set if we perform a three phase setup
  * @usb3_lpm_capable: set if hadrware supports Link Power Management
+ * @remote_wakeup: set if host supports Remote Wakeup from Peripheral
  * @disable_scramble_quirk: set if we enable the disable scramble quirk
  * @u2exit_lfps_quirk: set if we enable u2exit lfps quirk
  * @u2ss_inp3_quirk: set if we enable P3 OK for U2/SS Inactive quirk
@@ -829,6 +848,10 @@ struct dwc3_scratchpad_array {
  *			provide a free-running PHY clock.
  * @dis_del_phy_power_chg_quirk: set if we disable delay phy power
  *			change quirk.
+ * @enable_guctl1_resume_quirk: Set if we enable quirk for fixing improper crc
+ *			generation after resume from suspend.
+ * @enable_guctl1_ipd_quirk: set if we enable quirk for reducing timing of inter
+ *			packet delay(ipd).
  * @tx_de_emphasis_quirk: set if we enable Tx de-emphasis quirk
  * @tx_de_emphasis: Tx de-emphasis value
  * 	0	- -6dB de-emphasis
@@ -862,6 +885,8 @@ struct dwc3 {
 
 	struct usb_gadget	gadget;
 	struct usb_gadget_driver *gadget_driver;
+
+	struct dwc3_otg		*otg;
 
 	struct usb_phy		*usb2_phy;
 	struct usb_phy		*usb3_phy;
@@ -963,6 +988,7 @@ struct dwc3 {
 	unsigned		setup_packet_pending:1;
 	unsigned		three_stage_setup:1;
 	unsigned		usb3_lpm_capable:1;
+	unsigned                remote_wakeup:1;
 
 	unsigned		disable_scramble_quirk:1;
 	unsigned		u2exit_lfps_quirk:1;
@@ -978,6 +1004,8 @@ struct dwc3 {
 	unsigned		dis_rxdet_inp3_quirk:1;
 	unsigned		dis_u2_freeclk_exists_quirk:1;
 	unsigned		dis_del_phy_power_chg_quirk:1;
+	unsigned		enable_guctl1_resume_quirk:1;
+	unsigned		enable_guctl1_ipd_quirk:1;
 
 	unsigned		tx_de_emphasis_quirk:1;
 	unsigned		tx_de_emphasis:2;
@@ -1142,7 +1170,30 @@ static inline bool dwc3_is_usb31(struct dwc3 *dwc)
 	return !!(dwc->revision & DWC3_REVISION_IS_DWC31);
 }
 
-#if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+#if IS_ENABLED(CONFIG_USB_DWC3_OF_SIMPLE)
+int dwc3_enable_hw_coherency(struct device *dev);
+void dwc3_set_phydata(struct device *dev, struct phy *phy);
+void dwc3_simple_wakeup_capable(struct device *dev, bool wakeup);
+void dwc3_set_simple_data(struct dwc3 *dwc);
+void dwc3_simple_check_quirks(struct dwc3 *dwc);
+int dwc3_set_usb_core_power(struct dwc3 *dwc, bool on);
+#else
+static inline int dwc3_enable_hw_coherency(struct device *dev)
+{ return 1; }
+static inline void dwc3_set_phydata(struct device *dev, struct phy *phy)
+{ ; }
+void dwc3_simple_wakeup_capable(struct device *dev, bool wakeup)
+{ ; }
+void dwc3_set_simple_data(struct dwc3 *dwc)
+{ ; }
+void dwc3_simple_check_quirks(struct dwc3 *dwc)
+{ ; }
+int dwc3_set_usb_core_power(struct dwc3 *dwc, bool on)
+{ ; }
+#endif
+
+#if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)\
+	 || IS_ENABLED(CONFIG_USB_DWC3_OTG)
 int dwc3_host_init(struct dwc3 *dwc);
 void dwc3_host_exit(struct dwc3 *dwc);
 #else
@@ -1152,7 +1203,8 @@ static inline void dwc3_host_exit(struct dwc3 *dwc)
 { }
 #endif
 
-#if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
+#if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)\
+	 || IS_ENABLED(CONFIG_USB_DWC3_OTG)
 int dwc3_gadget_init(struct dwc3 *dwc);
 void dwc3_gadget_exit(struct dwc3 *dwc);
 int dwc3_gadget_set_test_mode(struct dwc3 *dwc, int mode);
@@ -1179,6 +1231,13 @@ static inline int dwc3_send_gadget_ep_cmd(struct dwc3_ep *dep, unsigned cmd,
 { return 0; }
 static inline int dwc3_send_gadget_generic_command(struct dwc3 *dwc,
 		int cmd, u32 param)
+{ return 0; }
+#endif
+
+#if IS_ENABLED(CONFIG_USB_DWC3_OTG)
+int dwc3_otg_init(struct dwc3 *dwc);
+#else
+static inline int dwc3_otg_init(struct dwc3 *dwc)
 { return 0; }
 #endif
 
@@ -1212,5 +1271,9 @@ static inline int dwc3_ulpi_init(struct dwc3 *dwc)
 static inline void dwc3_ulpi_exit(struct dwc3 *dwc)
 { }
 #endif
+
+int dwc3_alloc_event_buffers(struct dwc3 *dwc, unsigned length);
+void dwc3_free_event_buffers(struct dwc3 *dwc);
+int dwc3_event_buffers_setup(struct dwc3 *dwc);
 
 #endif /* __DRIVERS_USB_DWC3_CORE_H */
